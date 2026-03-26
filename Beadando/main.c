@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define N 2048
+#define N 200
 
 // Soros mátrixszorzás
 void soros_matrix_szorzas(float* A, float* B, float* C, int meret) {
