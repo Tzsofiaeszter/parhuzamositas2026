@@ -1,0 +1,29 @@
+## Feladat
+Két NxN méretű mátrix szorzása OpenCL segítségével.
+
+## Fájlok
+- `matrix.c` – A fő C program, ami kezeli az OpenCL futtatást és a soros mátrixszorzást.
+- `matrix.cl` – OpenCL kernel fájl, ami végzi a mátrixszorzást.
+- `README.md` – Ez a leírás.
+
+
+## Program felépítése
+1. Inicializál két NxN mátrixot véletlenszerű számokkal.
+2. Elvégzi a C-ben és méri az idejét.
+3. Betölti az OpenCL kernelt, CPU eszközt választ, és lefuttatja a mátrixszorzást.
+4. Kiírja a soros és OpenCL futási időt, valamint a gyorsítás mértékét.
+
+## Mérések
+Mért értékek:
+- soros futásidő
+- OpenCL futásidő
+- gyorsítás
+
+Gyorsítás = T_soros / T_opencl  
+(Hányszor gyorsabb az OpenCL (CPU-parallel) verzió, mint a hagyományos soros implementáció.)
+
+## Futtatás
+1. cd "D:\Beadando"
+2. make clean
+3. make
+4. matrix.exe
