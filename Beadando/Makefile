@@ -6,7 +6,7 @@ LIBS = -lOpenCL -lm
 TARGET = matrix.exe
 
 # Forrásfájlok
-SRCS = main.c kernel_loader.c
+SRCS = main2.c kernel_loader.c
 
 # Alap build target
 all: $(TARGET)

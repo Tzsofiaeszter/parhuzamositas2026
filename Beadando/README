@@ -1,29 +1,47 @@
 ## Feladat
 Két NxN méretű mátrix szorzása OpenCL segítségével.
 
+## Mátrix szorzás története
+- Jacques Philippe Marie Binet (1812): Őt tartják az elsőnek, aki meghatározta a két mátrix szorzására vonatkozó szabályt.
+- Arthur Cayley (1850-es évek): Ő alkotta meg a "mátrix" kifejezést, és kidolgozta a mátrixalgebra (összeadás, szorzás, inverz) elméletét. A mátrixszorzást a lineáris transzformációk összetételeként értelmezte.
+
 ## Fájlok
-- `matrix.c` – A fő C program, ami kezeli az OpenCL futtatást és a soros mátrixszorzást.
+- `main.c` – A fő C program, ami kezeli az OpenCL futtatást és a soros mátrixszorzást.
+- `main2.c` – A fő C program, ami kezeli az OpenCL futtatást és a soros mátrixszorzást local_size értéket használva.
 - `matrix.cl` – OpenCL kernel fájl, ami végzi a mátrixszorzást.
+- `kernel_loader.c` -  Megadja, hogy a kernel betöltsénél, milyen műveleteket kell végrehajtani
+- `kernel_loader.h` - Ezzel lesz elérhető minden egyéb kódnak a kernel_loader.c-ben található fgv.
 - `README.md` – Ez a leírás.
 
+## Local megadása
+- lokális méret megadásával csökkenthető a futási idő, ezzel pedig gyorsítható a GPU futtatása
+- ezt tartalmazza a main2.c, ami a main.c local_size-zal bővített változata
+- fontos, hogy a globális értéknek oszthatónak kell lennie a lokális értékkel: ez én esetemben ezek a 2 hatványai 
+- ebben az esetben a Makefile-t változtatni kell main.c-ről main2.c-re
 
 ## Program felépítése
 1. Inicializál két NxN mátrixot véletlenszerű számokkal.
-2. Elvégzi a C-ben és méri az idejét.
-3. Betölti az OpenCL kernelt, CPU eszközt választ, és lefuttatja a mátrixszorzást.
-4. Kiírja a soros és OpenCL futási időt, valamint a gyorsítás mértékét.
+2. Elvégzi a C-ben és méri az idejüket..
+3. Betölti az OpenCL kernelt és lefuttatja a mátrixszorzást.
+4. Kiírja sz eredményeket.
 
 ## Mérések
-Mért értékek:
-- soros futásidő
-- OpenCL futásidő
-- gyorsítás
-
-Gyorsítás = T_soros / T_opencl  
-(Hányszor gyorsabb az OpenCL (CPU-parallel) verzió, mint a hagyományos soros implementáció.)
+- soros futásidő:                        double soros_ido = (double)(t2-t1)/CLOCKS_PER_SEC;
+- OpenCL futásidő - host-> device:       double total_write_time = write_time_A + write_time_B;
+- OpenCL futásidő - device -> host:      double read_time = (double)(veg-kezdet)*1e-9;
+- Teljes GPU futási iő:                  double total_gpu_time = gpu_ido + total_write_time + read_time;
+- Gyorsítás CPU/kernel:                  soros_ido/gpu_ido
+- Gyorsítás CPU / teljes GPU:            soros_ido/total_gpu_time          
+- Szálak száma:                          size_t total_threads = global[0] * global[1];
+- Egy szál számítási ideje:              double time_per_thread = gpu_ido / total_threads;
+- Local-lal való gyorsítás:              size_t local[2] = {16, 16};
 
 ## Futtatás
-1. cd "D:\Beadando"
+1. cd "D:\Párhuzamosítás\Beadando"
 2. make clean
 3. make
 4. matrix.exe
+
+
+## Eredmények magyarázata
+- Kiértékelés.pdf - ben található
