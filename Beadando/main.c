@@ -5,184 +5,210 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define N 256
+#define N 2048
 
 // Soros mátrixszorzás
-void soros_matrix_szorzas(float* A, float* B, float* C, int meret) {
-    for(int i=0;i<meret;i++)
-        for(int j=0;j<meret;j++){
-            float osszeg=0;
-            for(int k=0;k<meret;k++)
-                osszeg += A[i*meret+k]*B[k*meret+j];
-            C[i*meret+j] = osszeg;
+void serial_matrix_multiplication(float* A, float* B, float* C, int size) {
+    for(int i=0;i<size;i++)
+        for(int j=0;j<size;j++){
+            float sum=0;
+            for(int k=0;k<size;k++)
+                sum += A[i*size+k]*B[k*size+j];
+            C[i*size+j] = sum;
         }
 }
 
-int main() {
-    cl_int hiba;                    
-    cl_uint platformok_szama;       
-    cl_platform_id platform_azon;   
-    cl_device_id eszkoz_azon;       
-    cl_context kontextus;           
-    cl_command_queue parancs_sor;   
+// OpenCL inicializálás
+int init_opencl(cl_platform_id* platform, cl_device_id* device, cl_context* context, cl_command_queue* queue) {
 
+    cl_int error;
+    cl_uint platform_count;
 // 1. Lekérdezi az elérhető OpenCL platformokat
-    hiba = clGetPlatformIDs(1, &platform_azon, &platformok_szama);
-    if(hiba != CL_SUCCESS){ 
-        printf("Platform hiba: %d\n", hiba); 
-        return 1; 
+    error = clGetPlatformIDs(1, platform, &platform_count);
+    if(error != CL_SUCCESS){
+        printf("Platform error: %d\n", error);
+        return 1;
     }
 
-    cl_uint eszkozok_szama;
-
-// 2. GPU eszköz lekérdezése
-    hiba = clGetDeviceIDs(platform_azon, CL_DEVICE_TYPE_GPU, 1, &eszkoz_azon, &eszkozok_szama);
-    if(hiba != CL_SUCCESS){ 
-        printf("Device hiba: %d\n", hiba); 
-        return 1; 
+// 2. GPU eszköz lekérdezése, device
+    error = clGetDeviceIDs(*platform, CL_DEVICE_TYPE_GPU, 1, device, NULL);
+    if(error != CL_SUCCESS){
+        printf("Device error: %d\n", error);
+        return 1;
     }
 
 // 3. OpenCL kontextus létrehozása 
-    kontextus = clCreateContext(NULL, 1, &eszkoz_azon, NULL, NULL, &hiba);
- 
-// 4. Parancssor profilinggal
+    *context = clCreateContext(NULL, 1, device, NULL, NULL, &error);
+
+// 4.-5. Parancssor profilinggal
     cl_queue_properties props[] = { CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0 };
-    parancs_sor = clCreateCommandQueueWithProperties(kontextus, eszkoz_azon, props, &hiba);
+    *queue = clCreateCommandQueueWithProperties(*context, *device, props, &error);
 
-    // Kernel betöltése
-    int err;
-    char* kernel_src = load_kernel_source("matrix.cl", &err);
-    if (err != 0) {
-        printf("Kernel file betoltesi hiba!\n");
-        return 1;
-    }
-
-// 6. Host buffer inicializálása
-    float* A = (float*)malloc(N*N*sizeof(float));
-    float* B = (float*)malloc(N*N*sizeof(float));
-    float* C_soros = (float*)malloc(N*N*sizeof(float));
-    float* C_gpu = (float*)malloc(N*N*sizeof(float));
-
-    for(int i=0;i<N*N;i++){
-        A[i] = (float)(rand()%10);
-        B[i] = (float)(rand()%10);
-        C_soros[i]=C_gpu[i]=0;
-    }
-
-    // CPU futásidő mérés
-    clock_t t1 = clock();
-    soros_matrix_szorzas(A,B,C_soros,N);
-    clock_t t2 = clock();
-    double soros_ido = (double)(t2-t1)/CLOCKS_PER_SEC;
-
-    printf("CPU: soros futasido: %.6f s\n", soros_ido);
+    return 0;
+}
 
 // 7. Device buffer létrehozása 
-    cl_mem bufA = clCreateBuffer(kontextus, CL_MEM_READ_ONLY, N*N*sizeof(float), NULL, &hiba);
-    cl_mem bufB = clCreateBuffer(kontextus, CL_MEM_READ_ONLY, N*N*sizeof(float), NULL, &hiba);
-    cl_mem bufC = clCreateBuffer(kontextus, CL_MEM_WRITE_ONLY, N*N*sizeof(float), NULL, &hiba);
+void create_buffers(cl_context context, cl_mem* bufferA, cl_mem* bufferB, cl_mem* bufferC) {
+    cl_int error;
 
-// --- Host -> Device másolás mérése ---
-    cl_event write_eventA, write_eventB;
+    *bufferA = clCreateBuffer(context, CL_MEM_READ_ONLY, N*N*sizeof(float), NULL, &error);
+    *bufferB = clCreateBuffer(context, CL_MEM_READ_ONLY, N*N*sizeof(float), NULL, &error);
+    *bufferC = clCreateBuffer(context, CL_MEM_WRITE_ONLY, N*N*sizeof(float), NULL, &error);
+}
 
-    clEnqueueWriteBuffer(parancs_sor, bufA, CL_TRUE, 0, N*N*sizeof(float), A, 0, NULL, &write_eventA);
-    clEnqueueWriteBuffer(parancs_sor, bufB, CL_TRUE, 0, N*N*sizeof(float), B, 0, NULL, &write_eventB);
+//a.) Host -> Device másolás mérése  :  CPU->GPU
+double write_to_device(cl_command_queue queue, cl_mem bufferA, cl_mem bufferB, float* A, float* B) {
 
-    cl_ulong kezdet, veg;
+    cl_event eventA, eventB;
+    cl_ulong start, end;
 
-    // A másolás ideje
-    clGetEventProfilingInfo(write_eventA, CL_PROFILING_COMMAND_START, sizeof(kezdet), &kezdet, NULL);
-    clGetEventProfilingInfo(write_eventA, CL_PROFILING_COMMAND_END, sizeof(veg), &veg, NULL);
-    double write_time_A = (double)(veg-kezdet)*1e-9;
+    clEnqueueWriteBuffer(queue, bufferA, CL_TRUE, 0, N*N*sizeof(float), A, 0, NULL, &eventA);
+    clEnqueueWriteBuffer(queue, bufferB, CL_TRUE, 0, N*N*sizeof(float), B, 0, NULL, &eventB);
 
-    clGetEventProfilingInfo(write_eventB, CL_PROFILING_COMMAND_START, sizeof(kezdet), &kezdet, NULL);
-    clGetEventProfilingInfo(write_eventB, CL_PROFILING_COMMAND_END, sizeof(veg), &veg, NULL);
-    double write_time_B = (double)(veg-kezdet)*1e-9;
+    clGetEventProfilingInfo(eventA, CL_PROFILING_COMMAND_START, sizeof(start), &start, NULL);
+    clGetEventProfilingInfo(eventA, CL_PROFILING_COMMAND_END, sizeof(end), &end, NULL);
+    double timeA = (double)(end-start)*1e-9;
 
-    double total_write_time = write_time_A + write_time_B;
-    printf("Host -> Device masolas ideje: %.6f s\n", total_write_time);
+    clGetEventProfilingInfo(eventB, CL_PROFILING_COMMAND_START, sizeof(start), &start, NULL);
+    clGetEventProfilingInfo(eventB, CL_PROFILING_COMMAND_END, sizeof(end), &end, NULL);
+    double timeB = (double)(end-start)*1e-9;
 
+    return timeA + timeB;
+}
+
+// b.) Kernel futás
+double run_kernel(cl_context context, cl_device_id device, cl_command_queue queue,cl_mem bufferA, cl_mem bufferB, cl_mem bufferC, char* kernel_source, size_t* total_threads) {
+
+    cl_int error;
 // Program build
-    cl_program program = clCreateProgramWithSource(kontextus, 1, (const char**)&kernel_src, NULL, &hiba);
-    hiba = clBuildProgram(program, 1, &eszkoz_azon, NULL, NULL, NULL);
+    cl_program program = clCreateProgramWithSource(context, 1, (const char**)&kernel_source, NULL, &error);
+    error = clBuildProgram(program, 1, &device, NULL, NULL, NULL);
 
-    if(hiba != CL_SUCCESS){
+    if(error != CL_SUCCESS){
         size_t log_size;
-        clGetProgramBuildInfo(program, eszkoz_azon, CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
+        clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
         char* log = (char*)malloc(log_size+1);
-        clGetProgramBuildInfo(program, eszkoz_azon, CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+        clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
         log[log_size]=0;
         printf("Build log:\n%s\n", log);
         free(log);
-        return 1;
+        exit(1);
     }
 
-    cl_kernel kernel = clCreateKernel(program, "matrix_szorzas", &hiba);
+    cl_kernel kernel = clCreateKernel(program, "matrix_multiplication", &error);
 
-// 8. Kernel argumentumok
-    clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufA);
-    clSetKernelArg(kernel, 1, sizeof(cl_mem), &bufB);
-    clSetKernelArg(kernel, 2, sizeof(cl_mem), &bufC);
-    int n= N;
+    // Kernel argumentumok
+    int n = N;
+    clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferA);
+    clSetKernelArg(kernel, 1, sizeof(cl_mem), &bufferB);
+    clSetKernelArg(kernel, 2, sizeof(cl_mem), &bufferC);
     clSetKernelArg(kernel, 3, sizeof(int), &n);
 
-// 9. Problémaméret (szálak száma)
     size_t global[2] = {N, N};
+    size_t local[2] = {16,16};
 
-// Szálak számának kiírása
-    size_t total_threads = global[0] * global[1];
-    printf("GPU szalak (work-item): %lu x %lu = %lu\n", (unsigned long)global[0],(unsigned long)global[1], (unsigned long)total_threads);
+// Szálak számának kiírása 
+    *total_threads = global[0] * global[1];
+    printf("GPU threads: %lu x %lu = %lu\n", (unsigned long)global[0], (unsigned long)global[1], (unsigned long)(*total_threads));
 
-// 11. Kernel futtatás
-    cl_event esemeny;
-    hiba = clEnqueueNDRangeKernel(parancs_sor, kernel, 2, NULL, global, NULL, 0, NULL, &esemeny);
-    clWaitForEvents(1,&esemeny);
+    cl_event event;
+    clEnqueueNDRangeKernel(queue, kernel, 2, NULL, global, local, 0, NULL, &event);
+    clWaitForEvents(1,&event);
 
-// Kernel idő
-    clGetEventProfilingInfo(esemeny, CL_PROFILING_COMMAND_START, sizeof(kezdet), &kezdet, NULL);
-    clGetEventProfilingInfo(esemeny, CL_PROFILING_COMMAND_END, sizeof(veg), &veg, NULL);
-    double gpu_ido = (double)(veg-kezdet)*1e-9;
+    cl_ulong start, end;
+    clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_START, sizeof(start), &start, NULL);
+    clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_END, sizeof(end), &end, NULL);
 
-    printf("GPU kernel futasido: %.6f s\n", gpu_ido);
+    double kernel_time = (double)(end-start)*1e-9;
 
-// Egy szál idejének becslése
-    double time_per_thread = gpu_ido / total_threads;
-    printf("Egy GPU szal becsult ideje: %.12f s\n", time_per_thread);
+    clReleaseKernel(kernel);
+    clReleaseProgram(program);
+    clReleaseEvent(event);
 
-// 12. Device -> Host másolás mérése
-    cl_event read_event;
+    return kernel_time;
+}
 
-    clEnqueueReadBuffer(parancs_sor, bufC, CL_TRUE, 0, N*N*sizeof(float), C_gpu, 0, NULL, &read_event);
+//12. Device -> Host másolás mérése  : GPU->CPU
+double read_from_device(cl_command_queue queue, cl_mem bufferC, float* C) {
 
-    clGetEventProfilingInfo(read_event, CL_PROFILING_COMMAND_START, sizeof(kezdet), &kezdet, NULL);
-    clGetEventProfilingInfo(read_event, CL_PROFILING_COMMAND_END, sizeof(veg), &veg, NULL);
-    double read_time = (double)(veg-kezdet)*1e-9;
+    cl_event event;
+    cl_ulong start, end;
 
-    printf("Device -> Host masolas ideje: %.6f s\n", read_time);
+    clEnqueueReadBuffer(queue, bufferC, CL_TRUE, 0, N*N*sizeof(float), C, 0, NULL, &event);
 
-// Teljes GPU idő
-    double total_gpu_time = gpu_ido + total_write_time + read_time;
-    printf("Teljes GPU ido (masolassal): %.6f s\n", total_gpu_time);
+    clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_START, sizeof(start), &start, NULL);
+    clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_END, sizeof(end), &end, NULL);
 
-// Gyorsítások
-    printf("Gyorsitas (CPU / kernel): %.2f\n", soros_ido/gpu_ido);
-    printf("Gyorsitas (CPU / teljes GPU): %.2f\n", soros_ido/total_gpu_time);
+    return (double)(end-start)*1e-9;
+}
+
+
+int main() {
+// 6. Host buffer inicializálása  : CPU
+    float* A = malloc(N*N*sizeof(float));
+    float* B = malloc(N*N*sizeof(float));
+    float* C_cpu = malloc(N*N*sizeof(float));
+    float* C_gpu = malloc(N*N*sizeof(float));
+
+    for(int i=0;i<N*N;i++){
+        A[i] = rand()%10;
+        B[i] = rand()%10;
+        C_cpu[i]=C_gpu[i]=0;
+    }
+
+    // CPU CPU futásidő mérés
+    clock_t t1 = clock();
+    serial_matrix_multiplication(A,B,C_cpu,N);
+    clock_t t2 = clock();
+    double cpu_time = (double)(t2-t1)/CLOCKS_PER_SEC;
+
+    printf("CPU time: %.6f s\n", cpu_time);
+
+//1.-5. OpenCL inicializálás
+    cl_platform_id platform;
+    cl_device_id device;
+    cl_context context;
+    cl_command_queue queue;
+
+    if(init_opencl(&platform, &device, &context, &queue) != 0)
+        return 1;
+
+// 7. Device buffer létrehozása 
+    cl_mem bufferA, bufferB, bufferC;
+    create_buffers(context, &bufferA, &bufferB, &bufferC);
+
+    // Kernel betöltése
+    int err;
+    char* kernel_source = load_kernel_source("matrix.cl", &err);
+
+    // CPU->GPU
+    double write_time = write_to_device(queue, bufferA, bufferB, A, B);
+
+    // Kernel futás
+    size_t total_threads;
+    double kernel_time = run_kernel(context, device, queue, bufferA, bufferB, bufferC, kernel_source, &total_threads);
+
+    // GPU->CPU
+    double read_time = read_from_device(queue, bufferC, C_gpu);
+
+    double total_gpu_time = kernel_time + write_time + read_time;
+
+// 13. Eredmények kiírása
+    printf("GPU kernel time: %.6f s\n", kernel_time);
+    printf("Total GPU time: %.6f s\n", total_gpu_time);
+    printf("Speedup (CPU / kernel): %.2f\n", cpu_time/kernel_time);
+    printf("Speedup (CPU / total GPU): %.2f\n", cpu_time/total_gpu_time);
+    printf("Time per thread: %.12f s\n", kernel_time / total_threads);
 
 // 14. Felszabadítás
-    free(kernel_src);
-    clReleaseMemObject(bufA);
-    clReleaseMemObject(bufB);
-    clReleaseMemObject(bufC);
-    clReleaseKernel(kernel);
-    clReleaseEvent(esemeny);
-    clReleaseProgram(program);
-    clReleaseCommandQueue(parancs_sor);
-    clReleaseContext(kontextus);
-    clReleaseEvent(read_event);
-    clReleaseEvent(write_eventA);
-    clReleaseEvent(write_eventB);
+    free(kernel_source);
+    clReleaseMemObject(bufferA);
+    clReleaseMemObject(bufferB);
+    clReleaseMemObject(bufferC);
+    clReleaseCommandQueue(queue);
+    clReleaseContext(context);
 
-    free(A); free(B); free(C_soros); free(C_gpu);
+    free(A); free(B); free(C_cpu); free(C_gpu);
 
     return 0;
 }
