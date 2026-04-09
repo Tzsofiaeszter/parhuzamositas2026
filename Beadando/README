@@ -27,8 +27,6 @@ Két NxN méretű mátrix szorzása OpenCL segítségével.
 
 ## Mérések
 - soros futásidő:                        double soros_ido = (double)(t2-t1)/CLOCKS_PER_SEC;
-- OpenCL futásidő - host-> device:       double total_write_time = write_time_A + write_time_B;
-- OpenCL futásidő - device -> host:      double read_time = (double)(veg-kezdet)*1e-9;
 - Teljes GPU futási iő:                  double total_gpu_time = gpu_ido + total_write_time + read_time;
 - Gyorsítás CPU/kernel:                  soros_ido/gpu_ido
 - Gyorsítás CPU / teljes GPU:            soros_ido/total_gpu_time          
